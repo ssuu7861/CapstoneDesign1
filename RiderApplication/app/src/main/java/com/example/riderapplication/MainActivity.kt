@@ -5,7 +5,10 @@ import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
+
 import android.widget.Button
+import net.daum.mf.map.api.MapView
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
@@ -38,7 +41,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        val mapView = MapView(this)
+        val mapViewContainer = findViewById<ViewGroup>(R.id.map_view)
+        mapViewContainer.addView(mapView)
+
+
         initializeSockets()
+
         user = User(udpSocket.localPort)
 
         val loginButton = findViewById<View>(R.id.login) as Button
@@ -177,12 +186,13 @@ class MainActivity : AppCompatActivity() {
                 val md: MessageDigest = MessageDigest.getInstance("SHA")
                 md.update(signature.toByteArray())
                 val hashKey = String(android.util.Base64.encode(md.digest(), 0))
-                Log.e("hash", "해시키 : $hashKey")
+                Log.d("hash", "해시키 : $hashKey")
             }
         } catch (e: Exception) {
             Log.e("error", "해시키를 찾을 수 없습니다 : $e")
         }
     }
+
 
 
 }

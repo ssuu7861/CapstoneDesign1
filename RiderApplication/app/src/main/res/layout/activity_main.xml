@@ -7,30 +7,45 @@
     android:orientation="vertical"
     tools:context=".MainActivity">
 
-    <Button
-        android:id="@+id/login"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="로그인"/>
+        android:orientation="horizontal">
+            <Button
+                android:id="@+id/login"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="로그인"/>
 
-    <Button
-        android:id="@+id/logout"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="로그아웃"/>
+            <Button
+                android:id="@+id/logout"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="로그아웃"/>
 
 
-    <Button
-        android:id="@+id/randomStart"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="이동 시작"/>
+            <Button
+                android:id="@+id/randomStart"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="이동 시작"/>
 
-    <Button
-        android:id="@+id/randomStop"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="이동 종료"/>
+            <Button
+                android:id="@+id/randomStop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="이동 종료"/>
+
+    </LinearLayout>
+
+
+
+    <RelativeLayout
+        android:id="@+id/map_view"
+        android:layout_marginTop="50dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
+
 
 
 
