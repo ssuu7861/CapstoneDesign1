@@ -6,8 +6,10 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
-
+import android.Manifest
 import android.widget.Button
+import androidx.core.app.ActivityCompat
+import net.daum.mf.map.api.MapPoint
 import net.daum.mf.map.api.MapView
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -18,13 +20,14 @@ import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.timerTask
 
 /*
 Main Server : 15.165.129.230 - 8080
  Sub Server : 54.89.51.96 - 9000
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
 
     private val serverIp = "54.89.51.96"
     private val serverPort = 9000
@@ -34,26 +37,39 @@ class MainActivity : AppCompatActivity() {
     private val tcpTimer = Timer()
     private val udpTimer = Timer()
     private var managerList = CopyOnWriteArrayList<Manager>()
-    private var location = CopyOnWriteArrayList<Int>()
+    private val location = AtomicReference<Pair<Int, Int>>()
     private lateinit var user: User
+    private lateinit var mapView : MapView
+    private lateinit var mapViewContainer : ViewGroup
+    private val LOCATION_PERMISSION_REQUEST_CODE = 1001
+
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val mapView = MapView(this)
-        val mapViewContainer = findViewById<ViewGroup>(R.id.map_view)
+        mapView = MapView(this)
+        mapViewContainer = findViewById(R.id.map_view)
         mapViewContainer.addView(mapView)
+        mapView.currentLocationTrackingMode = MapView.CurrentLocationTrackingMode.TrackingModeOnWithoutHeading
+        mapView.setShowCurrentLocationMarker(true)
+        mapView.setCurrentLocationEventListener(this)
 
 
         initializeSockets()
-
         user = User(udpSocket.localPort)
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), LOCATION_PERMISSION_REQUEST_CODE)
+        } else {
+            mapView.currentLocationTrackingMode = MapView.CurrentLocationTrackingMode.TrackingModeOnWithoutHeading
+        }
 
         val loginButton = findViewById<View>(R.id.login) as Button
         val logoutButton = findViewById<View>(R.id.logout) as Button
-        val randomStartButton = findViewById<View>(R.id.randomStart) as Button
-        val randomStopButton = findViewById<View>(R.id.randomStop) as Button
+
 
         loginButton.setOnClickListener {
             user.login = true
@@ -63,9 +79,14 @@ class MainActivity : AppCompatActivity() {
             //udpTimer.scheduleAtFixedRate(timerTask { udpSend() }, 0, 1000)
 
         }
+        logoutButton.setOnClickListener {
+            user.login = false
+        }
+
 
 
     }
+
     private fun initializeSockets() {
         val socketInitializationThread = Thread{
             udpSocket = DatagramSocket()
@@ -82,54 +103,50 @@ class MainActivity : AppCompatActivity() {
 
     private fun tcpSend() {
         Thread{
-            try {
-                val outputStream = tcpSocket.getOutputStream()
-//                outputStream.write("port : ${udpSocket.localPort}".toByteArray())
-                val head = 1234;
-                val bodyLength = 16;
-                val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).apply {
-                    putInt(head)
-                    putInt(user.job)
-                    putInt(user.company)
-                    putInt(bodyLength)
+            if(tcpSocket.isConnected && user.login){
+                try {
+                    val outputStream = tcpSocket.getOutputStream()
+    //                outputStream.write("location: $latitude, $longitude ".toByteArray())
+                    val head = 1234;
+                    val bodyLength = 16;
+                    val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).apply {
+                        putInt(head)
+                        putInt(user.job)
+                        putInt(user.company)
+                        putInt(bodyLength)
+                    }
+                    outputStream.write(buffer.array())
+                    buffer.clear()
+                    val (latitude, longitude) = location.get()
+                    buffer.putInt(user.id)
+                    buffer.putInt(user.port)
+                    buffer.putInt(latitude)
+                    buffer.putInt(longitude)
+                    outputStream.write(buffer.array())
+
+                }catch (e:Exception){
+                    e.printStackTrace()
                 }
-                outputStream.write(buffer.array())
-                buffer.clear()
-
-                val latitude = 1;
-                val longitude = 16;
-
-                buffer.putInt(user.id)
-                buffer.putInt(user.port)
-                buffer.putInt(latitude)
-                buffer.putInt(longitude)
-                outputStream.write(buffer.array())
-
-            }catch (e:Exception){
-                e.printStackTrace()
             }
         }.start()
     }
     private fun udpSend() {
         Thread{
-            try{
-                managerList.forEach{manager ->
-                    //아이디, 위도, 경도 넣기
-                    val inetSocketAddress = InetSocketAddress(manager.ip, manager.port)
-                    val send = user.id.toString().toByteArray()
-                    val datagramPacket = DatagramPacket(send, send.size, inetSocketAddress)
-                    udpSocket.send(datagramPacket)
-                }
+            if(udpSocket.isConnected && user.login){
+                try{
+                    managerList.forEach{manager ->
+                        //아이디, 위도, 경도 넣기
+                        val inetSocketAddress = InetSocketAddress(manager.ip, manager.port)
+                        val send = user.id.toString().toByteArray()
+                        val datagramPacket = DatagramPacket(send, send.size, inetSocketAddress)
+                        udpSocket.send(datagramPacket)
+                    }
 
-            }catch (e:Exception){
-                e.printStackTrace()
+                }catch (e:Exception){
+                    e.printStackTrace()
+                }
             }
         }.start()
-
-
-
-
-
     }
 
     private fun tcpReceive() {
@@ -141,7 +158,6 @@ class MainActivity : AppCompatActivity() {
                     val buffer = ByteArray(1024)
                     val bytes = inputStream.read(buffer)
                     val result = String(buffer.copyOfRange(0, bytes))
-                    Log.d("receive", result)
                     parsing(result)
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -150,11 +166,39 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+
+
+    override fun onCurrentLocationUpdate(mapView: MapView?, currentLocation: MapPoint, accuracyInMeters: Float) {
+
+        mapView?.setMapCenterPointAndZoomLevel(currentLocation, 1, true)
+        val coordinate = currentLocation.mapPointGeoCoord
+        Log.d("GPS", "${coordinate.latitude}, ${coordinate.longitude}")
+        location.set(Pair((coordinate.latitude * 100000).toInt(), (coordinate.longitude*100000).toInt()))
+
+    }
+    //위치 추적 실패
+    override fun onCurrentLocationDeviceHeadingUpdate(mapView: MapView?, deviceHeading: Float) {
+
+    }
+
+    // 위치 추적 시 사용자가 지정한 경로를 벗어났을 때
+    override fun onCurrentLocationUpdateFailed(mapView: MapView?) {
+
+    }
+
+    // 위치 추적 종료 시
+    override fun onCurrentLocationUpdateCancelled(mapView: MapView?) {
+
+    }
+
+
     private fun parsing(message: String){
         val managers = message.split("|")
+        managerList.clear()
         managers.forEach{managerStr ->
             val manager = managerStr.split("-")
             managerList.add(Manager(manager[0], manager[1].toInt()))
+
         }
         //초기화 : clear()
         //삭제 :managerList.removeIf { manager -> manager.id == "1"}
