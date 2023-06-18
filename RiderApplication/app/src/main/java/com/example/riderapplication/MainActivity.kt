@@ -8,13 +8,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.Manifest
 import android.widget.Button
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import net.daum.mf.map.api.MapPoint
 import net.daum.mf.map.api.MapView
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetSocketAddress
-import java.net.Socket
+import java.net.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
@@ -29,8 +27,8 @@ Main Server : 15.165.129.230 - 8080
  */
 class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
 
-    private val serverIp = "54.89.51.96"
-    private val serverPort = 9000
+    private val serverIp = "43.201.82.94"
+    private val serverPort = 8080
     private val serverAddress = InetSocketAddress(serverIp,serverPort)
     private lateinit var tcpSocket : Socket
     private lateinit var udpSocket : DatagramSocket
@@ -42,6 +40,7 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
     private lateinit var mapView : MapView
     private lateinit var mapViewContainer : ViewGroup
     private val LOCATION_PERMISSION_REQUEST_CODE = 1001
+    private val TAG = "LogData"
 
 
 
@@ -58,7 +57,8 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
 
 
         initializeSockets()
-        user = User(udpSocket.localPort)
+
+        udpTest()
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
             && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -72,19 +72,42 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
 
 
         loginButton.setOnClickListener {
+            Toast.makeText(this, "loginButton", Toast.LENGTH_SHORT).show()
             user.login = true
 
             tcpReceive()
             tcpTimer.scheduleAtFixedRate(timerTask { tcpSend() }, 0, 7000)
-            //udpTimer.scheduleAtFixedRate(timerTask { udpSend() }, 0, 1000)
+            udpTimer.scheduleAtFixedRate(timerTask { udpSend() }, 0, 1000)
 
         }
         logoutButton.setOnClickListener {
+            Toast.makeText(this, "logoutButton", Toast.LENGTH_SHORT).show()
             user.login = false
         }
 
 
 
+    }
+
+    private fun udpTest() {
+        val udpTestThread = Thread{
+            var inetSocketAddress = InetSocketAddress("15.165.22.113",3000)
+            val send = "HI".toByteArray()
+            var datagramPacket = DatagramPacket(send, send.size, inetSocketAddress)
+            udpSocket.send(datagramPacket)
+            val buffer = ByteArray(1024)
+            datagramPacket = DatagramPacket(buffer, buffer.size)
+            udpSocket.receive(datagramPacket)
+            val result = String(datagramPacket.data, 0, datagramPacket.length, Charsets.UTF_8)/*.trim()*/
+            Log.d(TAG, "udpTestReceive : $result")
+            user = User(result.toInt())
+        }
+        udpTestThread.start()
+        try {
+            udpTestThread.join()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun initializeSockets() {
@@ -107,23 +130,27 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
                 try {
                     val outputStream = tcpSocket.getOutputStream()
     //                outputStream.write("location: $latitude, $longitude ".toByteArray())
-                    val head = 1234;
-                    val bodyLength = 16;
-                    val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).apply {
+                    val head = 1234
+                    val bodyLength = 20
+                    var buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).apply {
                         putInt(head)
                         putInt(user.job)
-                        putInt(user.company)
+                        putInt(1)
                         putInt(bodyLength)
                     }
                     outputStream.write(buffer.array())
+
                     buffer.clear()
                     val (latitude, longitude) = location.get()
-                    buffer.putInt(user.id)
-                    buffer.putInt(user.port)
-                    buffer.putInt(latitude)
-                    buffer.putInt(longitude)
-                    outputStream.write(buffer.array())
 
+                    buffer = ByteBuffer.allocate(20).order(ByteOrder.LITTLE_ENDIAN).apply{
+                        putInt(user.id)
+                        putInt(user.company)
+                        putInt(user.port)
+                        putInt(latitude)
+                        putInt(longitude)
+                    }
+                    outputStream.write(buffer.array())
                 }catch (e:Exception){
                     e.printStackTrace()
                 }
@@ -132,12 +159,11 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
     }
     private fun udpSend() {
         Thread{
-            if(udpSocket.isConnected && user.login){
+            if(user.login){
                 try{
                     managerList.forEach{manager ->
-                        //아이디, 위도, 경도 넣기
                         val inetSocketAddress = InetSocketAddress(manager.ip, manager.port)
-                        val send = user.id.toString().toByteArray()
+                        val send = "${user.id}-${location.get().first}-${location.get().second}".toByteArray()
                         val datagramPacket = DatagramPacket(send, send.size, inetSocketAddress)
                         udpSocket.send(datagramPacket)
                     }
@@ -153,13 +179,25 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
         Thread{
             while (tcpSocket.isConnected&&user.login) {
                 try {
-
+                    tcpSocket.soTimeout=5000
                     val inputStream = tcpSocket.getInputStream()
                     val buffer = ByteArray(1024)
                     val bytes = inputStream.read(buffer)
-                    val result = String(buffer.copyOfRange(0, bytes))
-                    parsing(result)
-                } catch (e: Exception) {
+                    if (bytes > 0) {
+                        val result = String(buffer, 0, bytes, Charsets.UTF_8)
+                        Log.d(TAG, "TCP Result : $result")
+                        parsing(result)
+                    } else {
+                        managerList.clear()
+                        Log.d(TAG, "TcpReceive : data 누락")
+                    }
+
+            }
+                catch (e: SocketTimeoutException) {
+                    // Timeout occurred
+                    managerList.clear()
+                    Log.d(TAG, "TcpReceive : 응답이 없음")
+                }catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
@@ -172,7 +210,7 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
 
         mapView?.setMapCenterPointAndZoomLevel(currentLocation, 1, true)
         val coordinate = currentLocation.mapPointGeoCoord
-        Log.d("GPS", "${coordinate.latitude}, ${coordinate.longitude}")
+        Log.d(TAG,  "GPS : ${coordinate.latitude}, ${coordinate.longitude}")
         location.set(Pair((coordinate.latitude * 100000).toInt(), (coordinate.longitude*100000).toInt()))
 
     }
@@ -203,7 +241,7 @@ class MainActivity : AppCompatActivity(), MapView.CurrentLocationEventListener{
         //초기화 : clear()
         //삭제 :managerList.removeIf { manager -> manager.id == "1"}
         managerList.forEach{
-                manager ->  Log.d("ManagerList", "IP:${manager.ip}, PORT:${manager.port}")
+                manager ->  Log.d(TAG, "ManagerList IP:${manager.ip}, PORT:${manager.port}")
         }
 
     }
